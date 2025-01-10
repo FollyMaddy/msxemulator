@@ -71,12 +71,25 @@ Green2--- 1.2k Ohm resister --+---> VGA Green
 SCC 音源などの出力を使うには I2S DAC が必要です。
 
 ---
+# 使い方
+
+`prebuild` 以下にある uf2 ファイルを Pico に書き込みます。
+
+- msxemulator.uf2           PWM 出力(PSGのみ) 
+- msxemulator_scc.uf2       I2S DAC 出力(SCC 対応)
+
+初めて使う場合には、システム ROM の書き込みが必要です。
+
+---
 # ROM など
 
 著作権の関係で ROM は含まれていません。
 
 最低限 MSX1 のシステム ROM (32KiB)が必要です。
-実機を持っていなくても ROM カートリッジしか使わない場合は、C-BIOS が使えます。
+実機を持っていなくても ROM カートリッジしか使わない場合は、[C-BIOS](https://cbios.sourceforge.net/) が使えます。
+C-BIOS を使う場合には、`cbios_main_msx1_jp.rom` を使ってください。
+
+用意したファイルを [picotool](https://github.com/raspberrypi/pico-sdk-tools/releases)などで書き込みます。
 
 ```
 ROM 本体
