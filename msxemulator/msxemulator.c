@@ -16,7 +16,9 @@
 //  GP16: I2S LRCLK
 
 // Configuration
-#define USE_I2S     // Enable I2S DAC Output and SCC emulation
+//#define USE_I2S     // Enable I2S DAC Output and SCC emulation
+
+//#define USE_FDC
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -55,6 +57,7 @@
 #include "audio_i2s.pio.h"
 
 #include "lfs.h"
+#include "fdc.h"
 
 // VGAout configuration
 
@@ -86,6 +89,7 @@ uint32_t cpu_cycles=0;
 uint32_t cpu_hsync=0;
 
 uint32_t cpu_trace=0;   // DEBUG
+uint32_t cpu_boost=0;
 
 // Slot configuration
 // Slot0: BASIC
@@ -185,9 +189,12 @@ uint32_t tape_read_wait=0;
 uint32_t tape_leader=0;
 uint32_t tape_autoclose=0;          // Default value of TAPE autoclose
 uint32_t tape_skip=0;               // Default value of TAPE load accelaration
+uint32_t tape_cycles;
 
-#define TAPE_WAIT 2200
-#define TAPE_WAIT_SHORT 400
+const uint32_t tape_waits[] = { 650 ,1300 , 325 , 650 } ;  // Tape signal width
+const uint8_t tape_cas_header[] = { 0x1F, 0xA6, 0xDE , 0xBA , 0xCC , 0x13,  0x7D, 0x74  };
+
+#define TAPE_WAIT_WIDTH 20
 
 #define TAPE_THRESHOLD 200000
 
@@ -197,13 +204,6 @@ uint8_t uart_count=0;
 volatile uint8_t uart_write_ptr=0;
 volatile uint8_t uart_read_ptr=0;
 uint32_t uart_cycle;
-
-
-#ifdef USE_FDC
-#include "fdc.h"
-uint8_t diskbuffer[0x400];
-unsigned char fd_filename[16];
-#endif
 
 // UI
 
@@ -243,7 +243,7 @@ lfs_t lfs;
 lfs_file_t lfs_file,lfs_fd,lfs_cart1,lfs_cart2;
 
 #define FILE_THREHSOLD 20000000
-#define LFS_LS_FILES 9
+#define LFS_LS_FILES 12
 
 volatile uint32_t load_enabled=0;
 volatile uint32_t save_enabled=0;
@@ -258,7 +258,6 @@ unsigned char cart2_filename[16];
 static inline unsigned char tohex(int);
 static inline unsigned char fromhex(int);
 static inline void video_print(uint8_t *);
-uint8_t fdc_find_sector(void);
 
 // *REAL* H-Sync for emulation
 void __not_in_flash_func(hsync_handler)(void) {
@@ -628,12 +627,152 @@ void __not_in_flash_func(uart_handler)(void) {
 
 uint8_t tapein() {
 
-#if 0
-    static uint8_t tapebyte;
+static uint32_t tape_diff_cycles;
+static uint8_t tape_bits,tape_file_data;
+static uint8_t tape_half_bit,tape_signal;
+static uint16_t tape_data;
+static uint16_t tape_byte;
+static uint32_t tape_header_bits;
+static uint8_t tape_baud;
+static uint8_t tape_last_bits;
+
+    if(tape_ready==0) {
+        return 0;
+    }
 
     if(load_enabled==0) {
         return 0;
     }
+
+    tape_diff_cycles=cpu_cycles-tape_cycles;
+//    tape_cycles=cpu_cycles;
+//    tape_last_bits=data;
+
+    if(tape_phase%2) {
+
+        if(tape_diff_cycles<tape_waits[(tape_last_bits+1)%2]) {
+            return tape_signal;
+        }
+
+//    printf("[D:%d,%d,%d,%d,%x]",tape_diff_cycles,tape_signal,tape_last_bits,tape_bits,tape_file_data);
+
+        tape_cycles=cpu_cycles;
+
+        if(tape_bits==0) { // start bit
+            if(tape_signal) {   // 1 -> 0
+                tape_signal=0;
+                tape_bits++;
+                tape_half_bit=0;
+                tape_last_bits=(tape_file_data&1);
+                return 0;
+            } else {            // 0 -> 1
+                tape_signal=1;
+                return 1;
+            }
+        }
+        if(tape_bits<9) {
+            if(tape_signal) {   // 1 -> 0
+                tape_signal=0;
+                if(tape_last_bits) {
+                    if(tape_half_bit==0) {
+                        tape_half_bit++;
+                        return 0;
+                    }
+                }
+                if(tape_bits<8) {
+                    tape_last_bits=tape_file_data>>tape_bits;
+                    tape_last_bits&=1;
+                    tape_bits++;
+                    tape_half_bit=0;
+                    return 0;
+                } else {
+                    tape_last_bits=1;
+                    tape_bits++;
+                    tape_half_bit=0;
+                    return 0;                    
+                }
+                return 0;
+            } else {            // 0 -> 1
+                tape_signal=1;
+                return 1;
+            }
+        }
+
+            if(tape_signal) {   // 1 -> 0
+
+                if(tape_last_bits) {
+                    if(tape_half_bit==0) {
+                        tape_half_bit++;
+                        tape_signal=0;
+                        return 0;
+                    }
+                }
+                if(tape_bits==9) {
+                    tape_last_bits=1;
+                    tape_bits++;
+                    tape_signal=0;
+                    tape_half_bit=0;
+                    return 0;
+                } else {
+                    tape_last_bits=0;
+                    tape_bits=0;
+                    tape_signal=0;
+                    tape_half_bit=0;
+                    lfs_file_read(&lfs,&lfs_file,&tape_file_data,1);
+                    tape_data=tape_file_data;
+                    tape_ptr++;
+
+                    return 0;                    
+                }
+            } else {            // 0 -> 1
+                tape_signal=1;
+                return 1;
+            }
+        
+    } else {
+        // Header 
+        // Return '1' 2400baud
+
+        if((tape_diff_cycles)>10000L) { // First 'h'
+            tape_cycles=cpu_cycles;
+            tape_signal=1;
+            tape_header_bits=0;
+            return 1;
+        }
+        if(tape_diff_cycles>tape_waits[0]) {
+
+//    printf("[H:%d,%d,%d,%d]",tape_diff_cycles,tape_signal,tape_header_bits,tape_phase);
+
+            tape_cycles=cpu_cycles;
+            if(tape_signal) {
+                tape_signal=0;
+                tape_header_bits++;
+                if(tape_header_bits>8000) {
+                    // Skip CAS Header
+                    for(int i=0;i<9;i++) {
+                        lfs_file_read(&lfs,&lfs_file,&tape_file_data,1);
+                    }
+                    tape_bits=0;
+                    tape_ptr++;
+                    tape_last_bits=0;
+                    tape_phase++;
+                    tape_header_bits=0;
+                }
+                return 0;
+            } else {
+                tape_signal=1;
+                return 1;
+            }
+        } else {
+            return tape_signal;
+        }
+    }
+
+
+#if 0
+    static uint8_t tapebyte;
+
+
 
     lfs_file_read(&lfs,&lfs_file,&tapebyte,1);
     tape_ptr++;
@@ -657,24 +796,96 @@ uint8_t tapein() {
 
 void tapeout(uint8_t data) {
 
+static uint32_t tape_diff_cycles;
+static uint8_t tape_bits,tape_file_data;
+static uint8_t tape_half_bit;
+static uint16_t tape_data;
+static uint16_t tape_byte;
+static uint8_t tape_baud;
+static uint8_t tape_last_bits;
+
     if(tape_ready) {
 
-        if(save_enabled) {
+        if(tape_last_bits!=data) {
 
+            tape_diff_cycles=cpu_cycles-tape_cycles;
+            tape_cycles=cpu_cycles;
+            tape_last_bits=data;
+
+//            printf("[%d:%d]",data,tape_diff_cycles);
+
+            // Skip headers
+
+            if(tape_phase%2) {
+                if(data==0) {
+                    if((tape_diff_cycles>tape_waits[tape_baud]-TAPE_WAIT_WIDTH)&&(tape_diff_cycles<tape_waits[tape_baud]+TAPE_WAIT_WIDTH)) {
+                        tape_data=0;
+                        tape_half_bit=0; 
+  //                      printf("0");
+                    } else if((tape_diff_cycles>tape_waits[tape_baud-1]-TAPE_WAIT_WIDTH)&&(tape_diff_cycles<tape_waits[tape_baud-1]+TAPE_WAIT_WIDTH)) {
+                        if(tape_half_bit) {
+                            tape_data=0x8000;
+                            tape_half_bit=0;
+   //                         printf("1");
+                        } else {
+                            tape_half_bit=1;
+                            return;
+                        }
+                    } 
+                    tape_byte=(tape_byte>>1)|tape_data;
+                    tape_bits++;
+                    if(tape_bits==11) {
+                        if(save_enabled) {
+                            save_enabled=2;
+                            tape_file_data=(tape_byte>>6)&0xff;
+                            tape_ptr++;
+                            lfs_file_write(&lfs,&lfs_file,&tape_file_data,1);
+                        } else {
+                            printf("[%02x]",(tape_byte>>6)&0xff);
+                        }
+                        tape_bits=0;
+                        tape_byte=0;
+                    }
+                }                
+            } else {
+
+                if(data!=0) {
+                    if(tape_diff_cycles>10000L) {  // It is first H bit
+                        tape_baud=0;
+                        tape_bits=0;
+                        tape_byte=0;
+                    }
+                } 
+                if(data==0) {
+                    if(tape_baud==0) {  // Baud rate check  (header bit is always '1')
+                        if((tape_diff_cycles>tape_waits[0]-TAPE_WAIT_WIDTH)&&(tape_diff_cycles<tape_waits[0]+TAPE_WAIT_WIDTH)) {
+                            tape_baud=1;
+//printf("[1200]\n");
+                        } else {
+                            tape_baud=3;
+//printf("[2400]\n");                            
+                        }
+                    } else {
+                        if((tape_diff_cycles>tape_waits[tape_baud]-TAPE_WAIT_WIDTH)&&(tape_diff_cycles<tape_waits[tape_baud]+TAPE_WAIT_WIDTH)) {
+                        // first '0' bit = Statbit of Data section
+                            tape_bits=1;
+                            tape_byte=0;
+                            tape_phase++;
+                        // Write CAS Header
+
+                            lfs_file_write(&lfs,&lfs_file,tape_cas_header,8);
+
+                        }
+                    } 
+                }
+            }
         }
-    }
 
-#if 0
-    if(save_enabled) {
-
-        lfs_file_write(&lfs,&lfs_file,&data,1);
-        tape_ptr++;
-//        printf("(%02x)",data);
-
-    } else {
-        printf("%02x",data);
-    }
-#endif
+//        if(save_enabled) {
+//
+//        }
+    } 
+    
 }
 
 void menuinit(void) {
@@ -787,7 +998,7 @@ int draw_files(int num_selected,int page) {
         }
 
         cursor_x=28;
-        cursor_y=18;
+        cursor_y=23;
         fbcolor=7;
         sprintf(str,"Page %02d",page+1);
 
@@ -817,7 +1028,7 @@ int draw_files(int num_selected,int page) {
 
                 if(num_selected>=0) {
                     cursor_x=20;
-                    cursor_y=num_selected+3;
+                    cursor_y=(num_selected%LFS_LS_FILES)+3;
                     video_print("->");
                 }
 
@@ -1200,13 +1411,123 @@ void process_kbd_report(hid_keyboard_report_t const *report) {
 }
 
 // cart slots 
+
+void cart_type_checker(uint8_t cartno) {
+
+    // check cart type on flash
+
+    uint32_t hists[8],cartsize,candidate_count;
+    uint8_t param,candidate;
+
+    if(cartno==0) {
+        cartsize=lfs_file_size(&lfs,&lfs_cart1);        
+    } else {
+        cartsize=lfs_file_size(&lfs,&lfs_cart2);
+    }
+
+//    printf("[Cart %d type %d]",cartno,cartsize);
+
+    for(int i=0;i<8;i++) {
+        hists[i]=0;
+    }
+
+    for(int i=0;i<cartsize;i++) {
+
+        param=0;
+
+        if((cartno==0)&&(cartrom1[i]==0x32)&&(cartrom1[i+1]==0)) {
+            param=cartrom1[i+2];
+        }
+        if((cartno==1)&&(cartrom2[i]==0x32)&&(cartrom2[i+1]==0)) { 
+            param=cartrom2[i+2];
+        }
+
+        switch(param) {
+
+            case 0x50:
+                hists[4]++;
+                break;
+
+            case 0x60:
+                hists[1]++;
+                hists[2]++;
+                hists[3]++;
+                break;
+
+            case 0x68:
+                hists[1]++;
+                break;
+
+            case 0x70:
+                hists[1]++;
+                hists[2]++;
+                hists[4]++;
+                break;
+
+            case 0x78:
+                hists[1]++;
+                break;
+
+            case 0x80:
+                hists[3]++;
+                break;
+
+            case 0x90:
+                hists[4]++;
+                break;
+
+            case 0x98:
+                hists[4]++;
+                break;
+
+            case 0xa0:
+                hists[3]++;
+                break;
+
+            case 0xb0:
+                hists[4]++;
+                break;
+
+            default:
+                break;            
+
+        }
+    }
+
+    // Guesser
+
+    //  ASCII 8  :0x6000-0x7fff  
+    //  ASCII16  :0x6000-0x67ff,0x7000-0x77ff
+    //  Konami   :0x6000-0xbfff
+    //  KonamiSCC:0x5000-0xb7ff
+
+
+    candidate=0;
+    if(cartsize>=0x10000) {
+        candidate_count=0;
+        for(int i=1;i<5;i++) {
+//        printf("[cart:%d,%d]\n",i,hists[i]);
+            if(hists[i]>candidate_count) {
+                candidate=i;
+                candidate_count=hists[i];
+            }
+        }
+    }
+
+    carttype[cartno]=candidate;
+
+    return;
+
+}
+
+
 int32_t cart_size_check(uint32_t cartno) {
 
     int32_t filesize;
 
     if(cartno==0) {
         filesize=lfs_file_size(&lfs,&lfs_cart1);
-        printf("[Cart1 check %d bytes]\n",filesize);
+//        printf("[Cart1 check %d bytes]\n",filesize);
         if(filesize>262144) {
             return -1;
         }
@@ -1233,7 +1554,7 @@ int32_t cart_compare(uint32_t cartno) {
     if(cartno==0) {
 //        lfs_file_rewind(&lfs,&lfs_cart1);
         filesize=lfs_file_size(&lfs,&lfs_cart1);
-                printf("[Cart1 compare %d bytes]\n",filesize);
+//                printf("[Cart1 compare %d bytes]\n",filesize);
         lfs_file_rewind(&lfs,&lfs_cart1);
         match=0;
         for(int i=0;i<filesize;i++) {
@@ -1242,6 +1563,7 @@ int32_t cart_compare(uint32_t cartno) {
                 match=-1;
             }
         }
+//        cart_type_checker(0,filesize);
         return match;
 
     } else {
@@ -1254,6 +1576,7 @@ int32_t cart_compare(uint32_t cartno) {
                 match=-1;
             }
         }
+//        cart_type_checker(1,filesize);
         return match;
     }
 
@@ -1263,14 +1586,13 @@ void cart_write(uint32_t cartno) {
 
     int32_t filesize;
 
-
     if(cartno==0) {
   //      lfs_file_rewind(&lfs,&lfs_cart1);
         filesize=lfs_file_size(&lfs,&lfs_cart1);
         lfs_file_rewind(&lfs,&lfs_cart1);
 
-        printf("[Cart1 flash %d bytes]\n",filesize);
-        printf("[Cart1 erasing]\n");
+        // printf("[Cart1 flash %d bytes]\n",filesize);
+        // printf("[Cart1 erasing]\n");
 
         for(int i=0;i<filesize;i+=4096) {
             uint32_t ints = save_and_disable_interrupts();   
@@ -1280,7 +1602,7 @@ void cart_write(uint32_t cartno) {
             restore_interrupts(ints);
         }
 
-        printf("[Cart1 writing]\n");
+        // printf("[Cart1 writing]\n");
 
         for(int i=0;i<filesize;i+=4096) {
 
@@ -1293,7 +1615,7 @@ void cart_write(uint32_t cartno) {
 
         }
 
-        printf("[Cart1 load done]\n");
+        // printf("[Cart1 load done]\n");
 
     }
 
@@ -1302,13 +1624,14 @@ void cart_write(uint32_t cartno) {
 }
 
 
+
 //
 
 static uint8_t mem_read(void *context,uint16_t address)
 {
 
     uint8_t b;
-    uint8_t slot;
+    uint8_t slot,extslotno;
     uint8_t bank;
     uint8_t bankno;
 
@@ -1330,7 +1653,11 @@ static uint8_t mem_read(void *context,uint16_t address)
    if(address==0xffff) {
  //       printf("[ES:%x]",extslot);
  //       return ~extslot[slot];        
-        return 0xff;
+        if(slot==3) {
+            return ~extslot[3];
+        } else {
+            return 0xff;
+        }
     }
 
 
@@ -1412,9 +1739,65 @@ static uint8_t mem_read(void *context,uint16_t address)
 
     case 3:  // RAM
 
-        return mainram[address];
+        extslotno=extslot[3];
 
-        break;
+        if(address<0x4000) {
+            extslotno&=3;
+        } else if(address<0x8000) {
+            extslotno>>=2;
+            extslotno&=3;
+        } else if(address<0xc000) {
+            extslotno>>=4;
+            extslotno&=3;
+        } else {
+            extslotno>>=6;
+            extslotno&=3;
+        }
+
+        switch(extslotno) {
+            case 0:
+                return mainram[address];
+
+            case 1:  // FDD
+
+#ifdef USE_FDC
+
+                if((address>=0x4000)&&(address<0x7ff8)) {
+                    return extrom1[address&0x3fff];
+                }
+
+                if(address==0x7ff8) { // status
+// if(Z80_PC(cpu)!=0x7703) {
+// printf("[FS:%x/%x]",fdc_read_status(),Z80_PC(cpu));
+// }
+                return fdc_read_status();
+                }
+                if(address==0x7ff9) { // Track
+                    return fdc_read_track();
+                }
+                if(address==0x7ffa) { // Sector
+                    return fdc_read_sector();
+                }               
+                if(address==0x7ffb) { // data
+                    return fdc_read();
+                }
+                if(address==0x7ffc) { // control1
+                    return fdc_read_control1();
+                }
+                if(address==0x7ffd) { // control2
+                    return fdc_read_control2();
+                }
+                if(address==0x7fff) { // status flag
+// printf("[FF:%x/%x]",fdc_read_status_flag(),Z80_PC(cpu));
+                    return fdc_read_status_flag();
+                }
+#endif
+                return 0xff;
+
+            default:
+                return 0xff;
+
+        }
 
     default:
         break;
@@ -1427,7 +1810,7 @@ static uint8_t mem_read(void *context,uint16_t address)
 static void mem_write(void *context,uint16_t address, uint8_t data)
 {
 
-    uint8_t slot;
+    uint8_t slot,extslotno;
 
     slot=ioport[0xa8];
 
@@ -1527,10 +1910,60 @@ static void mem_write(void *context,uint16_t address, uint8_t data)
 
         return;
 
-    case 3:  // RAM
+    case 3:  // Extslot
 
-        mainram[address]=data;
-        return;
+        extslotno=extslot[3];
+
+        if(address<0x4000) {
+            extslotno&=3;
+        } else if(address<0x8000) {
+            extslotno>>=2;
+            extslotno&=3;
+        } else if(address<0xc000) {
+            extslotno>>=4;
+            extslotno&=3;
+        } else {
+            extslotno>>=6;
+            extslotno&=3;
+        }
+
+        switch(extslotno) {
+            case 0:
+                mainram[address]=data;
+                return;
+
+            case 1: // FDC
+#ifdef USE_FDC
+                if(address==0x7ff8) { // command
+                    fdc_command_write(data);
+                    return;
+                }
+                if(address==0x7ff9) { // Track
+                    fdc_write_track(data);
+                    return;
+                }
+                if(address==0x7ffa) { // Sector
+                    fdc_write_sector(data);
+                    return;
+                }               
+                if(address==0x7ffb) { // data
+                    fdc_write(data);
+                    return;
+                }
+                if(address==0x7ffc) { // control1
+                    fdc_write_control1(data);
+                    return;
+                }
+                if(address==0x7ffd) { // control2
+                    fdc_write_control2(data);
+                }
+#endif
+                return;
+
+            default:
+                return;
+
+        }
 
     default:
         break;
@@ -1582,6 +2015,9 @@ static uint8_t io_read(void *context, uint16_t address)
             } else if(ioport[0xa0]==0xe) {  // joystick
                     b=0x3f;
                     if(key_kana_jis) b|=0x40;
+                    if((tape_ready)&&(load_enabled)) {
+                        if(tapein()) b|=0x80;
+                    }
                     return b;
             } else if(ioport[0xa0]==0xf) {
                     b=0x7f;
@@ -1661,9 +2097,12 @@ static void io_write(void *context, uint16_t address, uint8_t data)
         case 0xaa: // i8255 Port C
 
             if(data&0x10) {  // CMT Remote
-                tape_ready=1;
-            } else {
                 tape_ready=0;
+            } else {
+                tape_ready=1;
+                if(ioport[0xaa]&0x10) {
+                    tape_phase=0;
+                }
             }
 
             if(data&0x40) {    // Key Caps LED
@@ -1689,17 +2128,19 @@ static void io_write(void *context, uint16_t address, uint8_t data)
 
                 if(b==4) {  // CMT Remote
                     if(data&1) {
-                        tape_ready=1;
-                    } else {
+//printf("[CMT OFF]");
                         tape_ready=0;
+
+                    } else {
+//printf("[CMT ON]");
+                        tape_ready=1;
+                        tape_phase=0;
                     }
                 }
 
 
                 if(b==5) {  // Tape Out
                     tapeout(data&1);
-//                                printf("[%d/%d]\n\r",(data&1),cpu_clocks-lastclocks);
-//                                lastclocks=cpu_clocks;
                 }
 
                 if(b==6) {
@@ -1731,8 +2172,6 @@ static void io_write(void *context, uint16_t address, uint8_t data)
 
         default:
             break;
-
-
     }
 
     ioport[address&0xff]=data;
@@ -1917,6 +2356,8 @@ void init_emulator(void) {
     tape_ready=0;
     tape_leader=0;
 
+    fdc_init();
+
 }
 
 
@@ -1925,8 +2366,6 @@ void main_core1(void) {
 
     uint8_t bgcolor;
     uint32_t vramindex;
-
-//    uint32_t redraw_start,redraw_length;
 
     multicore_lockout_victim_init();
 
@@ -1937,7 +2376,6 @@ void main_core1(void) {
     irq_set_exclusive_handler (PIO0_IRQ_0, hsync_handler);
     irq_set_enabled(PIO0_IRQ_0, true);
     pio_set_irq0_source_enabled (pio0, pis_interrupt0 , true);
-
 
     // set PSG timer
     // Use polling insted for I2S mode
@@ -2064,12 +2502,11 @@ int main() {
     cpu_hsync=0;
     cpu_cycles=0;
 
-#ifdef USE_FDC
+
     lfs_handler=lfs;
-    fdc_init(diskbuffer);
+//    fdc_init(diskbuffer);
 
     fd_drive_status[0]=0;
-#endif
 
     // start emulator
     
@@ -2082,45 +2519,15 @@ int main() {
         cpu_cycles += z80_run(&cpu,1);
         cpu_clocks++;
 
-// if(cpu_trace) {
-
-// //    if(Z80_PC(cpu)==0x4d) {
-//     if(Z80_PC(cpu)==0x4154) {
-//         printf("[BPa/%x,%x]",Z80_SP(cpu),Z80_A(cpu));
-//         // printf("[E009:%x]",mainram[0xe009]);
-//     }
-
-//     if(Z80_PC(cpu)==0x41d7) {
-//         printf("[BPb/%x,%x]",Z80_HL(cpu),Z80_A(cpu));
-//     }
-
-//     if(Z80_PC(cpu)==0x41da) {
-//         printf("[BPc/%x,%x]",Z80_HL(cpu),Z80_A(cpu));
-//     }
-
-//     // if(Z80_PC(cpu)==0x97b3) {
-//     //     printf("[BPd/%x,%x]",Z80_HL(cpu),Z80_A(cpu));
-//     // }
-
-//     if(Z80_PC(cpu)==0x88ff) {
-//         printf("[BPe/%x,%x]",Z80_HL(cpu),Z80_A(cpu));
-//     }
-
-//     // if(Z80_PC(cpu)==0x5c) {
-//     //     printf("[BPf/%x,%x]",Z80_HL(cpu),Z80_A(cpu));
-//     // }
-
-// }
-
         // Wait
 
 //        if((cpu_cycles-cpu_hsync)>1 ) { // 63us * 3.58MHz = 227
-        // if((cpu_cycles-cpu_hsync)>113 ) { // 63us * 3.58MHz = 227
+        if((!cpu_boost)&&(cpu_cycles-cpu_hsync)>191 ) { // 63us * 3.58MHz = 227
 
-        //     while(video_hsync==0) ;
-        //     cpu_hsync=cpu_cycles;
-        //     video_hsync=0;
-        // }
+            while(video_hsync==0) ;
+            cpu_hsync=cpu_cycles;
+            video_hsync=0;
+        }
 
         if((video_vsync==2)&&(cpu.iff1)) {
             if(vrEmuTms9918RegValue(mainscreen,TMS_REG_1)&0x20) { // VDP Enable interrupt
@@ -2134,6 +2541,21 @@ int main() {
             video_vsync=2;
             vsync_scanline=scanline;
       
+            if((tape_autoclose)&&(save_enabled==2)) {
+                if((cpu_cycles-tape_cycles)>TAPE_THRESHOLD) {
+                    save_enabled=0;
+                    lfs_file_close(&lfs,&lfs_file);
+                }
+            }
+
+            if((tape_autoclose)&&(load_enabled==2)) {
+                if((cpu_cycles-tape_cycles)>TAPE_THRESHOLD) {
+                    load_enabled=0;
+                    lfs_file_close(&lfs,&lfs_file);
+                }
+            }
+
+
         }
 
         } else { // Menu Mode
@@ -2226,12 +2648,9 @@ int main() {
                     break;  
             }
 
-#ifdef USE_FDC
-
             cursor_x=3;
             cursor_y=11;
-
-            if(menuitem==3) { fbcolor=0x70; } else { fbcolor=7; } 
+#ifdef USE_FDC
             if(fd_drive_status[0]==0) {
                 video_print("FD: empty");
             } else {
@@ -2239,6 +2658,9 @@ int main() {
                 video_print(str);
             }
 #endif
+//  TODO:
+//    CHANGE Kana type
+
 
             cursor_x=3;
             cursor_y=12;
@@ -2259,32 +2681,14 @@ int main() {
             cursor_y=menuitem+6;
             video_print("->");
 
-// TEST
-            // cursor_x=3;
-            //  cursor_y=17;
-            //      sprintf(str,"%04x %x %04x %04x %x %04x %04x",Z80_PC(cpu),i8253[1],i8253_counter[1],i8253_preload[1],i8253[2],i8253_counter[2],i8253_preload[2]);
-            //      video_print(str);
-
-#ifdef USE_FDC   // for DEBUG ...
-           cursor_x=3;
-             cursor_y=18;
-//                 sprintf(str,"%04x %04x %04x %04x %04x",Z80_PC(cpu),Z80_AF(cpu),Z80_BC(cpu),Z80_DE(cpu),Z80_HL(cpu));
-                 sprintf(str,"%04x",Z80_PC(cpu));
-//                                  sprintf(str,"%04x",D7752e_GetStatus(voice_instance));
+   // for DEBUG ...
+   #ifdef USE_FDC
+           cursor_x=0;
+            cursor_y=23;
+                 sprintf(str,"%04x %04x %04x %04x %04x",Z80_PC(cpu),Z80_AF(cpu),Z80_BC(cpu),Z80_DE(cpu),Z80_HL(cpu));
+//                 sprintf(str,"%04x",Z80_PC(cpu));
                  video_print(str);
 #endif
-
-            // cursor_x=3;
-            //  cursor_y=18;
-            //      sprintf(str,"%d %d/%d/%d/%d %d",intrcount,vsynccount,vsynccountf1,vsynccountf2,vsynccountf,timercount);
-            //      video_print(str);
-
-
-            // cursor_x=3;
-            //  cursor_y=18;
-            //  uint16_t sp=Z80_SP(cpu);
-            //      sprintf(str,"%04x %04x %04x",mainram[sp]+256*mainram[sp+1],mainram[sp+2]+256*mainram[sp+3],mainram[sp+4]+256*mainram[sp+5]);
-            //      video_print(str);
 
             if(filelist==0) {
                 draw_files(-1,0);
@@ -2323,7 +2727,6 @@ int main() {
                     keypressed=0;
 
                     if(menuitem==0) {  // SAVE
-#if 0
                         if((load_enabled==0)&&(save_enabled==0)) {
 
                             uint32_t res=enter_filename();
@@ -2342,11 +2745,9 @@ int main() {
                             save_enabled=0;
                         }
                         menuprint=0;
-#endif
                     }
 
                     if(menuitem==1) { // LOAD
-#if 0
                         if((load_enabled==0)&&(save_enabled==0)) {
 
                             uint32_t res=file_selector();
@@ -2365,7 +2766,6 @@ int main() {
                             load_enabled=0;
                         }
                         menuprint=0;
-#endif
                     }
 
                     if(menuitem==2) { // Slot Load
@@ -2379,6 +2779,7 @@ int main() {
                                 if(cart_compare(0)!=0) {
                                     cart_write(0);
                                 }
+                                cart_type_checker(0);
                                 cart_loaded[0]=1;
                             }
                             lfs_file_close(&lfs,&lfs_cart1);
@@ -2400,8 +2801,6 @@ int main() {
                         menuprint=0;
                     }
 
-#ifdef USE_FDC
-
                     if(menuitem==5) {  // FD
                         if(fd_drive_status[0]==0) {
 
@@ -2418,7 +2817,6 @@ int main() {
                         }
                         menuprint=0;
                     }
-#endif
 
                     if(menuitem==6) { // Delete
 

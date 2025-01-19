@@ -1,9 +1,5 @@
 MSX1 Emulator for Raspberry Pi Pico
 ---
-# WORK IN PROGRESS
-
-現在作成中のため、ドキュメントに書かれている機能が未実装だったり不安定なことがあります。
----
 # 概要
 
 MSX1 のエミュレータです。
@@ -13,11 +9,11 @@ MSX1 のエミュレータです。
 - VDP (16KB/NTSC)
 - PSG
 - Konami SCC (DAC 出力時のみ)
-- ROM カートリッジ (仮)
+- ROM カートリッジ
+- テープ
 
 以下の機能は未実装です
 
-- テープ
 - FDD
 - Joypad
 
@@ -91,6 +87,8 @@ C-BIOS を使う場合には、`cbios_main_msx1_jp.rom` を使ってください
 
 用意したファイルを [picotool](https://github.com/raspberrypi/pico-sdk-tools/releases)などで書き込みます。
 
+~~FDC は SONY タイプの物を実装していますので、該当する DISKBIOS を書き込む必要があります~~
+
 ```
 ROM 本体
 $ picotool load -v -x msx1.rom -t bin -o 0x10030000
@@ -108,8 +106,7 @@ USB キーボードに存在しないキーは以下のように割り当てて�
 - GRAPH　→ ALT
 
 また F12 でメニュー画面に移ります。
-~~テープイメージの操作ができます。~~
-
+ROM ファイルや テープイメージの操作ができます。
 
 ---
 # ROM カートリッジ
@@ -117,10 +114,16 @@ USB キーボードに存在しないキーは以下のように割り当てて�
 2Mbit(256KiB) までの rom に対応しています。
 rom ファイルを LittleFS 上に置いた後で、F12 のメニューからロードできます。
 メガロムを使う場合は、カートリッジの Type を適切なものに設定してください。
+Type は自動認識されますが、誤認識することがありますので、注意してください。
 
 LittleFS の使い方については、
 [こちらの記事](https://shippoiincho.github.io/posts/39/)をご覧ください。
 
+---
+# Tape
+
+CAS 形式ファイルの入出力に対応しています。
+LittleFS 上においてください。
 ---
 # VGA
 
