@@ -1,4 +1,5 @@
-MSX1 Emulator for Raspberry Pi Pico
+# MSX1 Emulator for Raspberry Pi Pico
+
 ![BASIC](/pictures/screenshot00.jpg)
 
 ---
@@ -67,9 +68,9 @@ Green2--- 1.2k Ohm resister --+---> VGA Green
 SCC 音源などの出力を使うには I2S DAC が必要です。(I2S DAC は PCM5102A でテストしています。)
 I2S DAC との接続は以下のようになります。DAC 側の設定については使用する DAC の説明を参照してください。
 
-GPIO14 DATA
-GPIO15 BCLK
-GPIO16 LRCLK
+- GPIO14 DATA
+- GPIO15 BCLK
+- GPIO16 LRCLK
 
 ---
 # 使い方
