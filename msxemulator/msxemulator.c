@@ -16,7 +16,7 @@
 //  GP16: I2S LRCLK
 
 // Configuration
-//#define USE_I2S     // Enable I2S DAC Output and SCC emulation
+#define USE_I2S     // Enable I2S DAC Output and SCC emulation
 #define USE_FDC
 
 //#define USE_OPLL
@@ -2554,9 +2554,11 @@ void main_core1(void) {
 
     // set Hsync timer
 
+#ifndef USE_OPLL
     irq_set_exclusive_handler (PIO0_IRQ_0, hsync_handler);
     irq_set_enabled(PIO0_IRQ_0, true);
     pio_set_irq0_source_enabled (pio0, pis_interrupt0 , true);
+#endif
 
     // set PSG timer
     // Use polling insted for I2S mode
@@ -2647,6 +2649,14 @@ int main() {
     multicore_lockout_victim_init();
 
     sleep_ms(1);
+
+#ifdef USE_OPLL
+    // set Hsync timer
+
+    irq_set_exclusive_handler (PIO0_IRQ_0, hsync_handler);
+    irq_set_enabled(PIO0_IRQ_0, true);
+    pio_set_irq0_source_enabled (pio0, pis_interrupt0 , true);
+#endif
 
 // mount littlefs
     if(lfs_mount(&lfs,&PICO_FLASH_CFG)!=0) {
