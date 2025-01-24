@@ -16,7 +16,7 @@
 //  GP16: I2S LRCLK
 
 // Configuration
-#define USE_I2S     // Enable I2S DAC Output and SCC emulation
+//#define USE_I2S     // Enable I2S DAC Output and SCC emulation
 #define USE_FDC
 
 //#define USE_OPLL
