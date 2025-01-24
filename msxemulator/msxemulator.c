@@ -16,9 +16,10 @@
 //  GP16: I2S LRCLK
 
 // Configuration
-//#define USE_I2S     // Enable I2S DAC Output and SCC emulation
+#define USE_I2S     // Enable I2S DAC Output and SCC emulation
+#define USE_FDC
 
-//#define USE_FDC
+//#define USE_OPLL
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -38,6 +39,7 @@
 
 #include "tusb.h"
 #include "bsp/board.h"
+#include "hidparser/hidparser.h"
 
 #include "vga16_graphics.h"
 #include "tms9918/vrEmuTms9918.h"
@@ -163,16 +165,20 @@ uint32_t i2s_active_dma=0;
 uint i2s_chan_0 = 3;
 uint i2s_chan_1 = 4;
 PSG *msxpsg;
-SCC *msxscc;
+SCC *msxscc1;
+SCC *msxscc2;
 #ifdef USE_OPLL
 OPLL *msxopll;
 #endif
 #endif
 
-//TEST
 
+#ifndef USE_OPLL
 //#define SAMPLING_FREQ 44100    
-#define SAMPLING_FREQ 22050                             
+#define SAMPLING_FREQ 22050
+#else                             
+#define SAMPLING_FREQ 25000  // USE with OPLL
+#endif
 
 #define TIME_UNIT 100000000                           // Oscillator calculation resolution = 10nsec
 #define SAMPLING_INTERVAL (TIME_UNIT/SAMPLING_FREQ) 
@@ -214,6 +220,8 @@ uint32_t menuitem=0;
 
 hid_keyboard_report_t prev_report = { 0, 0, {0} }; // previous report to check key released
 extern void hid_app_task(void);
+extern volatile uint8_t gamepad_info;
+uint32_t gamepad_select=0;
 
 uint32_t usbcheck_count=0;
 uint32_t kbhit=0;            // 4:Key pressed (timer stop)/3&2:Key depressed (timer running)/1:no key irq triggerd
@@ -1617,6 +1625,35 @@ void cart_write(uint32_t cartno) {
 
         // printf("[Cart1 load done]\n");
 
+    } else {
+
+        filesize=lfs_file_size(&lfs,&lfs_cart2);
+        lfs_file_rewind(&lfs,&lfs_cart2);
+
+        // printf("[Cart1 flash %d bytes]\n",filesize);
+        // printf("[Cart1 erasing]\n");
+
+        for(int i=0;i<filesize;i+=4096) {
+            uint32_t ints = save_and_disable_interrupts();   
+            multicore_lockout_start_blocking();     // pause another core
+            flash_range_erase(i+0x60000, 4096);  
+            multicore_lockout_end_blocking();
+            restore_interrupts(ints);
+        }
+
+        // printf("[Cart1 writing]\n");
+
+        for(int i=0;i<filesize;i+=4096) {
+
+            lfs_file_read(&lfs,&lfs_cart2,&flash_buffer,4096);
+            uint32_t ints = save_and_disable_interrupts();
+            multicore_lockout_start_blocking();     // pause another core
+            flash_range_program(i+0x60000, (const uint8_t *)flash_buffer, 4096);
+            multicore_lockout_end_blocking();
+            restore_interrupts(ints);
+
+        }
+
     }
 
     return;
@@ -1667,9 +1704,7 @@ static uint8_t mem_read(void *context,uint16_t address)
     
         return basicrom[address&0x7fff];
 
-    case 1:  // CART ROM
-
-        // Plain type
+    case 1:  // CART ROM 1
 
         if(cart_enable[0]) {
 
@@ -1714,8 +1749,8 @@ static uint8_t mem_read(void *context,uint16_t address)
                         if((address>=0x9800)&&(address<0xa000)) {   // SCC
 
 #ifdef USE_I2S
-//printf("[SCR:%x:%x]",address,SCC_read(msxscc,address));
-                        return SCC_read(msxscc,address);
+//printf("[SCR:%x:%x]",address,SCC_read(msxscc1,address));
+                        return SCC_read(msxscc1,address);
 
 #endif
                             return 0xff;
@@ -1733,9 +1768,69 @@ static uint8_t mem_read(void *context,uint16_t address)
             return 0xff;
         }
 
-    case 2:  // EMPTY
+    case 2:  // Cart ROM2
 
-        return 0xff;
+        if(cart_enable[1]) {
+
+            switch(carttype[1]) {
+
+                case 0: // Plain
+                    return cartrom2[(address-0x4000)&0xffff];
+
+                case 1:  // ASCII8
+
+                    bank=(address-0x4000)>>13;
+                    bank&=3;
+                    bankno=megarom[bank+4];
+
+                    return cartrom2[(address&0x1fffL)+bankno*0x2000L];
+
+                case 2:  // ASCII16
+
+                    bank=(address-0x4000)>>14;
+                    bank&=1;
+                    bankno=megarom[bank+4];
+
+                    return cartrom2[(address&0x3fffL)+bankno*0x4000L];
+
+                case 3:  // KONAMI8
+
+                    bank=(address-0x4000)>>13;
+                    bank&=3;
+                    bankno=megarom[bank+4];
+
+                    if(bank==0) bankno=0;
+
+                    return cartrom2[(address&0x1fffL)+bankno*0x2000L];
+
+                case 4:  // KONAMI SCC
+
+                    bank=(address-0x4000)>>13;
+                    bank&=3;
+                    bankno=megarom[bank+4];
+
+                    if(bankno==63) {
+                        if((address>=0x9800)&&(address<0xa000)) {   // SCC
+
+#ifdef USE_I2S
+//printf("[SCR:%x:%x]",address,SCC_read(msxscc,address));
+                        return SCC_read(msxscc2,address);
+
+#endif
+                            return 0xff;
+                        }
+                    }
+
+                    return cartrom2[(address&0x1fffL)+bankno*0x2000L];
+
+                default:
+
+                    return 0xff;
+            }
+
+        } else {
+            return 0xff;
+        }
 
     case 3:  // RAM
 
@@ -1788,11 +1883,21 @@ static uint8_t mem_read(void *context,uint16_t address)
                     return fdc_read_control2();
                 }
                 if(address==0x7fff) { // status flag
-// printf("[FF:%x/%x]",fdc_read_status_flag(),Z80_PC(cpu));
                     return fdc_read_status_flag();
                 }
 #endif
                 return 0xff;
+
+#ifdef  USE_OPLL
+            case 2:
+
+                if((address>=0x4000)&&(address<0x8000)) {
+                    return extrom2[address&0x3fff];
+                }
+
+                return 0xff;
+#endif
+
 
             default:
                 return 0xff;
@@ -1854,7 +1959,6 @@ static void mem_write(void *context,uint16_t address, uint8_t data)
                     } else if((address>=0x7800)&&(address<0x8000)) {
                         megarom[3]=data;
                     } 
-
                     return;
 
                 case 2:  // ASCII 16
@@ -1864,7 +1968,6 @@ static void mem_write(void *context,uint16_t address, uint8_t data)
                     } else if((address>=0x7000)&&(address<0x7800)) {
                         megarom[1]=data;
                     } 
-
                     return;
 
                 case 3:  // Konami 8
@@ -1893,8 +1996,7 @@ static void mem_write(void *context,uint16_t address, uint8_t data)
 
 
 #ifdef USE_I2S
-                    SCC_write(msxscc,address,data);
-
+                    SCC_write(msxscc1,address,data);
 #endif
                     return;
 
@@ -1903,10 +2005,67 @@ static void mem_write(void *context,uint16_t address, uint8_t data)
             }
         }
 
-
         return;
  
-    case 2:  // EMPTY
+    case 2:  // Cart ROM 2
+        // MEGAROM
+        if(cart_enable[1]) {
+            switch(carttype[1]) {
+                
+                case 1:  // ASCII 8
+                    if((address>=0x6000)&&(address<0x6800)) {
+                        megarom[4]=data;
+                    } else if((address>=0x6800)&&(address<0x7000)) {
+                        megarom[5]=data;
+                    } else if((address>=0x7000)&&(address<0x7800)) {
+                        megarom[6]=data;
+                    } else if((address>=0x7800)&&(address<0x8000)) {
+                        megarom[7]=data;
+                    } 
+                    return;
+
+                case 2:  // ASCII 16
+
+                    if((address>=0x6000)&&(address<0x6800)) {
+                        megarom[4]=data;
+                    } else if((address>=0x7000)&&(address<0x7800)) {
+                        megarom[5]=data;
+                    } 
+                    return;
+
+                case 3:  // Konami 8
+
+                    if((address>=0x6000)&&(address<0x8000)) {
+                        megarom[5]=data&0x3f;
+                    } else if((address>=0x8000)&&(address<0xa000)) {
+                        megarom[6]=data&0x3f;
+                    } else if((address>=0xa000)&&(address<0xc000)) {
+                        megarom[7]=data&0x3f;
+                    } 
+
+                    return;
+
+                case 4:  // Konami SCC
+                
+                    if((address>=0x5000)&&(address<0x5800)) {
+                        megarom[4]=data&0x3f;
+                    } else if((address>=0x7000)&&(address<0x7800)) {
+                        megarom[5]=data&0x3f;
+                    } else if((address>=0x9000)&&(address<0x9800)) {
+                        megarom[6]=data&0x3f;
+                    } else if((address>=0xb000)&&(address<0xb800)) {
+                        megarom[7]=data&0x3f;
+                    } 
+
+#ifdef USE_I2S
+                    SCC_write(msxscc2,address,data);
+#endif
+                    return;
+
+                default:
+
+            }
+        }
 
         return;
 
@@ -1942,7 +2101,7 @@ static void mem_write(void *context,uint16_t address, uint8_t data)
                     fdc_write_track(data);
                     return;
                 }
-                if(address==0x7ffa) { // Sector
+                if(address==0x7ffa) { // Sector                
                     fdc_write_sector(data);
                     return;
                 }               
@@ -2013,10 +2172,15 @@ static uint8_t io_read(void *context, uint16_t address)
                 return psg_register[ioport[0xa0]&0xf];
 #endif
             } else if(ioport[0xa0]==0xe) {  // joystick
-                    b=0x3f;
+//                    b=0x3f;
                     if(key_kana_jis) b|=0x40;
                     if((tape_ready)&&(load_enabled)) {
                         if(tapein()) b|=0x80;
+                    }
+                    if(!gamepad_select) {
+                        b|=gamepad_info;
+                    } else {
+                        b|=0x3f;
                     }
                     return b;
             } else if(ioport[0xa0]==0xf) {
@@ -2066,6 +2230,12 @@ static void io_write(void *context, uint16_t address, uint8_t data)
 
 // DEBUG
 
+#ifdef USE_OPLL
+        case 0x7d:
+            OPLL_writeReg(msxopll,ioport[0x7c],data);            
+            return;
+#endif
+
         case 0x98:  // VDP Write
             vrEmuTms9918WriteData(mainscreen,data);
             return;
@@ -2089,6 +2259,11 @@ static void io_write(void *context, uint16_t address, uint8_t data)
                     key_kana=0;
                 } else {
                     key_kana=1;
+                }
+                if(data&0x40) {
+                    gamepad_select=1;
+                } else {
+                    gamepad_select=0;
                 }
             }
 
@@ -2237,8 +2412,11 @@ void i2s_init(void){
     PSG_setVolumeMode(msxpsg, 2);
     PSG_reset(msxpsg);
 
-    msxscc = SCC_new(3579545, SAMPLING_FREQ); 
-    SCC_reset(msxscc);
+    msxscc1 = SCC_new(3579545, SAMPLING_FREQ); 
+    SCC_reset(msxscc1);
+
+    msxscc2 = SCC_new(3579545, SAMPLING_FREQ); 
+    SCC_reset(msxscc2);
 
 #ifdef USE_OPLL
 //    msxopll = OPLL_new(3579545, SAMPLING_FREQ);
@@ -2300,7 +2478,8 @@ static inline void i2s_process(void) {
             i2s_active_dma=i2s_chan_0;
             for(int i=0;i<7;i++) {
                 wave=PSG_calc(msxpsg);
-                wave+=SCC_calc(msxscc);
+                if(cart_enable[0]) { wave+=SCC_calc(msxscc1); }
+                if(cart_enable[1]) { wave+=SCC_calc(msxscc2); }
                 if(beep_enable) wave+=0x1000;
 #ifdef USE_OPLL
                 wave+=OPLL_calc(msxopll);
@@ -2314,7 +2493,8 @@ static inline void i2s_process(void) {
             i2s_active_dma=i2s_chan_1;
             for(int i=0;i<7;i++) {
                 wave=PSG_calc(msxpsg);
-                wave+=SCC_calc(msxscc);
+                if(cart_enable[0]) { wave+=SCC_calc(msxscc1); }
+                if(cart_enable[1]) { wave+=SCC_calc(msxscc2); }
                 if(beep_enable) wave+=0x1000;
 #ifdef USE_OPLL
                 wave+=OPLL_calc(msxopll);
@@ -2347,7 +2527,8 @@ void init_emulator(void) {
 
 #ifdef USE_I2S
     PSG_reset(msxpsg);
-    SCC_reset(msxscc);
+    SCC_reset(msxscc1);
+    SCC_reset(msxscc2);
 //    OPLL_reset(msxopll);
 #else
     psg_reset(0);
@@ -2358,9 +2539,9 @@ void init_emulator(void) {
 
     fdc_init();
 
+    gamepad_info=0x3f;
+
 }
-
-
 
 void main_core1(void) {
 
@@ -2522,7 +2703,7 @@ int main() {
         // Wait
 
 //        if((cpu_cycles-cpu_hsync)>1 ) { // 63us * 3.58MHz = 227
-        if((!cpu_boost)&&(cpu_cycles-cpu_hsync)>191 ) { // 63us * 3.58MHz = 227
+        if((!cpu_boost)&&(cpu_cycles-cpu_hsync)>198 ) { // 63us * 3.58MHz = 227
 
             while(video_hsync==0) ;
             cpu_hsync=cpu_cycles;
@@ -2650,6 +2831,49 @@ int main() {
 
             cursor_x=3;
             cursor_y=11;
+
+            if(cart_loaded[1]==0) {
+                video_print("Slot2: empty");
+            } else {
+                sprintf(str,"Slot2: %8s",cart2_filename);
+                video_print(str);
+            }
+
+            cursor_x=4;
+            cursor_y=12;
+
+            if(cart_enable[1]) {
+                 video_print("Cart:Enable");
+            } else {
+                 video_print("Cart:Disable");
+            }
+
+            cursor_x=4;
+            cursor_y=13;
+
+            switch(carttype[1]) {
+                case 0:
+                    video_print("Type:Plain");
+                    break;  
+                case 1:
+                    video_print("Type:ASCII 8K");
+                    break;  
+                case 2:
+                    video_print("Type:ASCII 16K");
+                    break;  
+                case 3:
+                    video_print("Type:Konami");
+                    break;  
+                case 4:
+                    video_print("Type:KonamiSCC");
+                    break;  
+                default:
+                    video_print("Type:Unknown");
+                    break;  
+            }
+
+            cursor_x=3;
+            cursor_y=14;
 #ifdef USE_FDC
             if(fd_drive_status[0]==0) {
                 video_print("FD: empty");
@@ -2663,17 +2887,36 @@ int main() {
 
 
             cursor_x=3;
-            cursor_y=12;
+            cursor_y=15;
 
             video_print("DELETE File");
 
             cursor_x=3;
-            cursor_y=13;
+            cursor_y=16;
+
+            if(cpu_boost) {
+                 video_print("CPU:Fast");
+            } else {
+                 video_print("CPU:Normal");
+            }
+
+            cursor_x=3;
+            cursor_y=17;
+
+            if(key_kana_jis) {
+                 video_print("KANA:JIS");
+            } else {
+                 video_print("KANA:aiueo");
+            }
+
+
+            cursor_x=3;
+            cursor_y=18;
 
             video_print("Reset");
 
             cursor_x=3;
-            cursor_y=14;
+            cursor_y=19;
 
             video_print("PowerCycle");
 
@@ -2682,13 +2925,13 @@ int main() {
             video_print("->");
 
    // for DEBUG ...
-   #ifdef USE_FDC
-           cursor_x=0;
-            cursor_y=23;
-                 sprintf(str,"%04x %04x %04x %04x %04x",Z80_PC(cpu),Z80_AF(cpu),Z80_BC(cpu),Z80_DE(cpu),Z80_HL(cpu));
-//                 sprintf(str,"%04x",Z80_PC(cpu));
-                 video_print(str);
-#endif
+// #ifdef USE_FDC
+//            cursor_x=0;
+//             cursor_y=23;
+//                  sprintf(str,"%04x %04x %04x %04x %04x",Z80_PC(cpu),Z80_AF(cpu),Z80_BC(cpu),Z80_DE(cpu),Z80_HL(cpu));
+// //                 sprintf(str,"%04x",Z80_PC(cpu));
+//                  video_print(str);
+// #endif
 
             if(filelist==0) {
                 draw_files(-1,0);
@@ -2708,7 +2951,7 @@ int main() {
                     keypressed=0;
                     if(menuitem>0) menuitem--;
 #ifndef USE_FDC
-                    if(menuitem==5) menuitem--;
+                    if(menuitem==8) menuitem--;
 #endif
                 }
 
@@ -2717,9 +2960,9 @@ int main() {
                     cursor_y=menuitem+6;
                     video_print("  ");
                     keypressed=0;
-                    if(menuitem<8) menuitem++; 
+                    if(menuitem<13) menuitem++; 
 #ifndef USE_FDC
-                    if(menuitem==5) menuitem++;
+                    if(menuitem==8) menuitem++;
 #endif
                 }
 
@@ -2781,13 +3024,14 @@ int main() {
                                 }
                                 cart_type_checker(0);
                                 cart_loaded[0]=1;
+                            } else {
+                                cart_loaded[0]=0;
                             }
                             lfs_file_close(&lfs,&lfs_cart1);
                         }
 
                         menuprint=0;
                     }
-
 
                     if(menuitem==3) { // Cart enable/disable
                         cart_enable[0]++;
@@ -2801,7 +3045,41 @@ int main() {
                         menuprint=0;
                     }
 
-                    if(menuitem==5) {  // FD
+                    if(menuitem==5) { // Slot2 Load
+
+                        uint32_t res=file_selector();
+
+                        if(res==0) {
+                            memcpy(cart2_filename,filename,16);
+                            lfs_file_open(&lfs,&lfs_cart2,cart2_filename,LFS_O_RDONLY);
+                            if(cart_size_check(1)==0) {
+                                if(cart_compare(1)!=0) {
+                                    cart_write(1);
+                                }
+                                cart_type_checker(1);
+                                cart_loaded[1]=1;
+                            }else {
+                                cart_loaded[1]=0;
+                            }
+                            lfs_file_close(&lfs,&lfs_cart2);
+                        }
+
+                        menuprint=0;
+                    }
+
+                    if(menuitem==6) { // Cart enable/disable
+                        cart_enable[1]++;
+                        if(cart_enable[1]>1) cart_enable[1]=0;
+                        menuprint=0;
+                    }
+
+                    if(menuitem==7) { // Cart enable/disable
+                        carttype[1]++;
+                        if(carttype[1]>4) carttype[1]=0;
+                        menuprint=0;
+                    }
+
+                    if(menuitem==8) {  // FD
                         if(fd_drive_status[0]==0) {
 
                             uint32_t res=file_selector();
@@ -2818,7 +3096,7 @@ int main() {
                         menuprint=0;
                     }
 
-                    if(menuitem==6) { // Delete
+                    if(menuitem==9) { // Delete
 
                         if((load_enabled==0)&&(save_enabled==0)) {
                             uint32_t res=enter_filename();
@@ -2832,7 +3110,20 @@ int main() {
 
                     }
 
-                    if(menuitem==7) { // Reset
+                    if(menuitem==10) { 
+                        cpu_boost++;
+                        if(cpu_boost>1) cpu_boost=0;
+                        menuprint=0;
+                    }
+
+
+                    if(menuitem==11) { 
+                        key_kana_jis++;
+                        if(key_kana_jis>1) key_kana_jis=0;
+                        menuprint=0;
+                    }
+
+                    if(menuitem==12) { // Reset
                         menumode=0;
                         menuprint=0;
                     
@@ -2841,7 +3132,7 @@ int main() {
 
                     }
 
-                    if(menuitem==8) { // PowerCycle
+                    if(menuitem==13) { // PowerCycle
                         menumode=0;
                         menuprint=0;
 

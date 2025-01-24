@@ -10,8 +10,8 @@ pico_generate_pio_header(msxemulator ${CMAKE_CURRENT_LIST_DIR}/rgb.pio)
 # Make sure TinyUSB can find tusb_config.h
 target_include_directories(msxemulator PUBLIC ${CMAKE_CURRENT_LIST_DIR})
 
-#target_sources(msxemulator PRIVATE msxemulator.c Z80.c hid_app.c vga16_graphics.c lfs.c lfs_util.c tms9918/vrEmuTms9918.c tms9918/vrEmuTms9918Util.c emu2149/emu2149.c emu2413/emu2413.c emu2212/emu2212.c fdc.c)
-target_sources(msxemulator PRIVATE msxemulator.c Z80.c hid_app.c vga16_graphics.c lfs.c lfs_util.c tms9918/vrEmuTms9918.c tms9918/vrEmuTms9918Util.c emu2149/emu2149.c emu2212/emu2212.c fdc.c)
+target_sources(msxemulator PRIVATE msxemulator.c Z80.c hid_app.c joystick.c hidparser/hidparser.c vga16_graphics.c lfs.c lfs_util.c tms9918/vrEmuTms9918.c tms9918/vrEmuTms9918Util.c emu2149/emu2149.c emu2413/emu2413.c emu2212/emu2212.c fdc.c)
+#target_sources(msxemulator PRIVATE msxemulator.c Z80.c hid_app.c joystick.c hidparser/hidparser.c vga16_graphics.c lfs.c lfs_util.c tms9918/vrEmuTms9918.c tms9918/vrEmuTms9918Util.c emu2149/emu2149.c emu2212/emu2212.c fdc.c)
 
 pico_enable_stdio_usb(msxemulator 0)
 pico_enable_stdio_uart(msxemulator 1)

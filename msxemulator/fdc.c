@@ -36,7 +36,7 @@ void fdc_command_write(uint8_t param) {
 
     driveno=fdc_control2&1;
 
-printf("[FDC:%x,%d]",fdc_command,driveno);
+//printf("[FDC:%x,%d]",command,driveno);
 
     if(fd_drive_status[driveno]==0) {
         fdc_status=0x80;
@@ -164,7 +164,6 @@ printf("[FDC:%x,%d]",fdc_command,driveno);
             fdc_status=0;
             return;
 
-
         case 8: // Read single sector
 
             fdc_status_flag=0x80;
@@ -185,7 +184,6 @@ printf("[FDC:%x,%d]",fdc_command,driveno);
         case 0xa: // write single sector
 
             fdc_status_flag=0x80;
-
             fdc_find_sector();
             fdc_status=3;
             return;
@@ -193,7 +191,6 @@ printf("[FDC:%x,%d]",fdc_command,driveno);
         case 0xb: // write multi sector
 
             fdc_status_flag=0x80;
-
             fdc_find_sector();
             fdc_status=3;
             return;
@@ -384,7 +381,7 @@ uint8_t fdc_find_sector(void) {
             break; 
     }
 
-printf("[CHS:%d:%d:%d:%x]",track,head,sector,sector_ptr);
+//printf("[CHS:%d:%d:%d:%x]",track,head,sector,sector_ptr);
 
     lfs_file_seek(&lfs_handler,&fd_drive[driveno],sector_ptr,LFS_SEEK_SET);
 
@@ -450,7 +447,11 @@ uint8_t fdc_read() {
     driveno=fdc_control2&1;
 
     if(fd_drive_status[driveno]==0) return 0xff;
-    if(fdc_command==0) return 0xff;
+//    if(fdc_command==0) return 0xff;
+
+    if((fdc_command&0xe0)!=0x80) {  // After Seek command
+        return fd_track[driveno];
+    }
 
     if(fd_sector_bytes==fd_sector_size) {
         fdc_status_flag=0x40;
@@ -458,8 +459,6 @@ uint8_t fdc_read() {
     }
 
     lfs_file_read(&lfs_handler,&fd_drive[driveno],&data,1);
-
-printf("[%02x]",data);
 
     fd_sector_bytes++;
     fdc_status_flag=0x80;
@@ -492,9 +491,25 @@ void fdc_write(uint8_t data) {
 
     driveno=fdc_control2&1;
 
+    if((fdc_command&0xe0)!=0xa0) {
+        fdc_data_register=data;
+        return;
+    }
 
-    if(fd_drive_status[driveno]!=1) return;
-    if(fdc_command==0) return;
+    if(fd_drive_status[driveno]!=1) { // Write protected
+        fdc_status_flag=0x80;
+        fdc_status=0x43;
+
+        fd_sector_bytes++;
+        
+        if(fd_sector_bytes==fd_sector_size) {
+            fdc_status_flag=0x40;
+            fdc_status=0x40;
+        }
+
+        return;     
+    }
+    // if(fdc_command==0) return;
 
     if(fd_sector_bytes==fd_sector_size) {
         fdc_status_flag=0x40;
@@ -545,6 +560,11 @@ void fdc_init(void) {
 }
 
 uint8_t fdc_read_status(void) {
+    uint8_t driveno;
+    driveno=fdc_control1&1;
+    if(fd_drive_status[driveno]!=1) {   // Write protected
+        return fdc_status|0x40;
+    }
     return fdc_status;
 }
 
@@ -561,7 +581,7 @@ uint8_t fdc_read_control1(void) {
 }
 
 uint8_t fdc_read_control2(void) {
-    return fdc_control2;
+    return fdc_control2&0xfb;
 }
 
 uint8_t fdc_read_status_flag(void) {
