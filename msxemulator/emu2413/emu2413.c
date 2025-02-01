@@ -1005,6 +1005,16 @@ static INLINE int16_t calc_slot_hat(OPLL *opll) {
 #define _MO(x) (-(x) >> 1)
 #define _RO(x) (x)
 
+static void __time_critical_func(update_without_output)(OPLL *opll) {
+//static void update_output(OPLL *opll) {
+  int16_t *out;
+  int i;
+
+  update_ampm(opll);
+  update_short_noise(opll);
+  update_slots(opll);
+}
+
 static void __time_critical_func(update_output)(OPLL *opll) {
 //static void update_output(OPLL *opll) {
   int16_t *out;
@@ -1477,15 +1487,18 @@ void OPLL_resetPatch(OPLL *opll, uint8_t type) {
 
 //int16_t OPLL_calc(OPLL *opll) {
 int16_t __time_critical_func(OPLL_calc)(OPLL *opll) {
-  while (opll->out_step > opll->out_time) {
-    opll->out_time += opll->inp_step;
-    update_output(opll);
-    mix_output(opll);
-  }
-  opll->out_time -= opll->out_step;
-  if (opll->conv) {
-    opll->mix_out[0] = OPLL_RateConv_getData(opll->conv, 0);
-  }
+  // while (opll->out_step > opll->out_time) {
+  //   opll->out_time += opll->inp_step;
+  //   update_output(opll);
+  //   mix_output(opll);
+  // }
+  // opll->out_time -= opll->out_step;
+  // if (opll->conv) {
+  //   opll->mix_out[0] = OPLL_RateConv_getData(opll->conv, 0);
+  // }
+//  update_without_output(opll);
+  update_output(opll);
+  mix_output(opll);
   return opll->mix_out[0];
 }
 

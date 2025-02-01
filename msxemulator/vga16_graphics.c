@@ -1,3 +1,5 @@
+#include "msxemulator.h"
+
 #include <stdio.h>
 #include <stdlib.h>
 #include "pico/stdlib.h"
@@ -5,9 +7,15 @@
 #include "hardware/dma.h"
 // Our assembled programs:
 // Each gets the name <pio_filename.pio.h>
+#ifndef USE_OPLL
 #include "hsync.pio.h"
 #include "vsync.pio.h"
 #include "rgb.pio.h"
+#else
+#include "hsync2.pio.h"
+#include "vsync2.pio.h"
+#include "rgb2.pio.h"
+#endif
 // Header file
 #include "vga16_graphics.h"
 // Font file

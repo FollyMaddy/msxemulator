@@ -15,11 +15,7 @@
 //  GP15: I2S BCLK
 //  GP16: I2S LRCLK
 
-// Configuration
-#define USE_I2S     // Enable I2S DAC Output and SCC emulation
-#define USE_FDC
-
-//#define USE_OPLL
+#include "msxemulator.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -36,6 +32,7 @@
 #include "hardware/flash.h"
 #include "hardware/sync.h"
 #include "hardware/pwm.h"
+#include "hardware/vreg.h"
 
 #include "tusb.h"
 #include "bsp/board.h"
@@ -64,7 +61,11 @@
 // VGAout configuration
 
 #define DOTCLOCK 25000
+#ifdef USE_OPLL
+#define CLOCKMUL 10     // This is highly overclockd. it may cause unstable behavier.
+#else
 #define CLOCKMUL 9
+#endif
 // Pico does not work at CLOCKMUL=7 (175MHz).
 
 #define VGA_PIXELS_X 320
@@ -101,8 +102,9 @@ uint32_t cpu_boost=0;
 
 uint8_t extslot[4];
 uint8_t megarom[8];
+uint8_t memmap[4];
 
-uint8_t mainram[0x10000];
+uint8_t mainram[0x20000];
 uint8_t ioport[0x100];
 
 //uint32_t colormode=0;
@@ -158,6 +160,8 @@ const uint16_t psg_volume[] = { 0x00, 0x00, 0x01, 0x01, 0x02, 0x02, 0x03, 0x04,
 #define I2S_NUMSAMPLES    8
 int32_t i2s_data;
 uint16_t i2s_buffer[8];
+uint16_t wave_buffer[8];
+volatile uint8_t wave_in=0,wave_out=7;
 //int i2s_buffer[8];
 uint16_t __attribute__  ((aligned(256)))  i2s_buffer0[I2S_NUMSAMPLES*2];
 uint16_t __attribute__  ((aligned(256)))  i2s_buffer1[I2S_NUMSAMPLES*2];
@@ -177,7 +181,8 @@ OPLL *msxopll;
 //#define SAMPLING_FREQ 44100    
 #define SAMPLING_FREQ 22050
 #else                             
-#define SAMPLING_FREQ 25000  // USE with OPLL
+#define SAMPLING_FREQ 50000  // USE with OPLL
+//#define SAMPLING_FREQ 25000  // USE with OPLL
 #endif
 
 #define TIME_UNIT 100000000                           // Oscillator calculation resolution = 10nsec
@@ -1674,18 +1679,9 @@ static uint8_t mem_read(void *context,uint16_t address)
 
     slot=ioport[0xa8];
 
-    if(address<0x4000) {
-        slot&=3;
-    } else if(address<0x8000) {
-        slot>>=2;
-        slot&=3;
-    } else if(address<0xc000) {
-        slot>>=4;
-        slot&=3;
-    } else {
-        slot>>=6;
-        slot&=3;
-    }
+    bank=(address>>14);
+    slot>>=bank*2;
+    slot&=3;
 
    if(address==0xffff) {
  //       printf("[ES:%x]",extslot);
@@ -1835,23 +1831,14 @@ static uint8_t mem_read(void *context,uint16_t address)
     case 3:  // RAM
 
         extslotno=extslot[3];
-
-        if(address<0x4000) {
-            extslotno&=3;
-        } else if(address<0x8000) {
-            extslotno>>=2;
-            extslotno&=3;
-        } else if(address<0xc000) {
-            extslotno>>=4;
-            extslotno&=3;
-        } else {
-            extslotno>>=6;
-            extslotno&=3;
-        }
+        extslotno>>=bank*2;
+        extslotno&=3;
 
         switch(extslotno) {
             case 0:
-                return mainram[address];
+
+                return mainram[(address&0x3fff)+memmap[bank]*0x4000];
+//                return mainram[address];
 
             case 1:  // FDD
 
@@ -1915,22 +1902,13 @@ static uint8_t mem_read(void *context,uint16_t address)
 static void mem_write(void *context,uint16_t address, uint8_t data)
 {
 
-    uint8_t slot,extslotno;
+    uint8_t slot,extslotno,bank;
 
     slot=ioport[0xa8];
 
-    if(address<0x4000) {
-        slot&=3;
-    } else if(address<0x8000) {
-        slot>>=2;
-        slot&=3;
-    } else if(address<0xc000) {
-        slot>>=4;
-        slot&=3;
-    } else {
-        slot>>=6;
-        slot&=3;
-    }
+    bank=(address>>14);
+    slot>>=bank*2;
+    slot&=3;
 
     if(address==0xffff) {
         extslot[slot]=data;
@@ -2072,23 +2050,14 @@ static void mem_write(void *context,uint16_t address, uint8_t data)
     case 3:  // Extslot
 
         extslotno=extslot[3];
-
-        if(address<0x4000) {
-            extslotno&=3;
-        } else if(address<0x8000) {
-            extslotno>>=2;
-            extslotno&=3;
-        } else if(address<0xc000) {
-            extslotno>>=4;
-            extslotno&=3;
-        } else {
-            extslotno>>=6;
-            extslotno&=3;
-        }
+        extslotno>>=bank*2;
+        extslotno&=3;
 
         switch(extslotno) {
             case 0:
-                mainram[address]=data;
+
+//                mainram[address]=data;
+                mainram[(address&0x3fff)+memmap[bank]*0x4000]=data;
                 return;
 
             case 1: // FDC
@@ -2231,6 +2200,7 @@ static void io_write(void *context, uint16_t address, uint8_t data)
 // DEBUG
 
 #ifdef USE_OPLL
+
         case 0x7d:
             OPLL_writeReg(msxopll,ioport[0x7c],data);            
             return;
@@ -2343,6 +2313,14 @@ static void io_write(void *context, uint16_t address, uint8_t data)
             }
 
 
+            return;
+
+        case 0xfc:      // Memory mapper
+        case 0xfd:
+        case 0xfe:
+        case 0xff:
+            ioport[address&0xff]=data;
+            memmap[address&3]=data&7;
             return;
 
         default:
@@ -2477,13 +2455,15 @@ static inline void i2s_process(void) {
         if(i2s_active_dma!=i2s_chan_0) {
             i2s_active_dma=i2s_chan_0;
             for(int i=0;i<7;i++) {
-                wave=PSG_calc(msxpsg);
-                if(cart_enable[0]) { wave+=SCC_calc(msxscc1); }
-                if(cart_enable[1]) { wave+=SCC_calc(msxscc2); }
-                if(beep_enable) wave+=0x1000;
-#ifdef USE_OPLL
+#ifndef USE_OPLL
+               wave=PSG_calc(msxpsg);
+               if(cart_enable[0]) { wave+=SCC_calc(msxscc1); }
+               if(cart_enable[1]) { wave+=SCC_calc(msxscc2); }
+               if(beep_enable) wave+=0x1000;
+#else
+                wave=wave_buffer[wave_out++];
+                wave_out&=0x7;
                 wave+=OPLL_calc(msxopll);
-                wave2=OPLL_calc(msxopll);
 #endif
                 i2s_buffer1[i]=wave;
             }
@@ -2492,13 +2472,15 @@ static inline void i2s_process(void) {
         if(i2s_active_dma!=i2s_chan_1) {
             i2s_active_dma=i2s_chan_1;
             for(int i=0;i<7;i++) {
-                wave=PSG_calc(msxpsg);
-                if(cart_enable[0]) { wave+=SCC_calc(msxscc1); }
-                if(cart_enable[1]) { wave+=SCC_calc(msxscc2); }
-                if(beep_enable) wave+=0x1000;
-#ifdef USE_OPLL
+#ifndef USE_OPLL
+               wave=PSG_calc(msxpsg);
+               if(cart_enable[0]) { wave+=SCC_calc(msxscc1); }
+               if(cart_enable[1]) { wave+=SCC_calc(msxscc2); }
+               if(beep_enable) wave+=0x1000;
+#else
+                wave=wave_buffer[wave_out++];
+                wave_out&=0x7;
                 wave+=OPLL_calc(msxopll);
-                wave2=OPLL_calc(msxopll);
 #endif
                 i2s_buffer0[i]=wave;
             }
@@ -2529,7 +2511,9 @@ void init_emulator(void) {
     PSG_reset(msxpsg);
     SCC_reset(msxscc1);
     SCC_reset(msxscc2);
-//    OPLL_reset(msxopll);
+#ifdef USE_OPLL
+    OPLL_reset(msxopll);
+#endif
 #else
     psg_reset(0);
 #endif
@@ -2540,6 +2524,11 @@ void init_emulator(void) {
     fdc_init();
 
     gamepad_info=0x3f;
+
+    memmap[0]=3;
+    memmap[1]=2;
+    memmap[2]=1;
+    memmap[3]=0;
 
 }
 
@@ -2581,6 +2570,8 @@ int main() {
     uint32_t subcpu_wait;
 
     static uint32_t hsync_wait,vsync_wait;
+
+	// vreg_set_voltage(VREG_VOLTAGE_1_20);
 
     set_sys_clock_khz(DOTCLOCK * CLOCKMUL ,true);
 
@@ -2705,6 +2696,18 @@ int main() {
 
     while(1) {
 
+#ifdef USE_OPLL
+        // Fill sound data on core 0
+        while(wave_in!=wave_out) {
+               int16_t wave=PSG_calc(msxpsg);
+               if(cart_enable[0]) { wave+=SCC_calc(msxscc1); }
+               if(cart_enable[1]) { wave+=SCC_calc(msxscc2); }
+               if(beep_enable) wave+=0x1000;
+               wave_buffer[wave_in++]=wave;
+               wave_in&=0x7;
+        }
+#endif
+
         if(menumode==0) { // Emulator mode
 
         cpu_cycles += z80_run(&cpu,1);
@@ -2713,12 +2716,14 @@ int main() {
         // Wait
 
 //        if((cpu_cycles-cpu_hsync)>1 ) { // 63us * 3.58MHz = 227
+#ifndef USE_OPLL
         if((!cpu_boost)&&(cpu_cycles-cpu_hsync)>198 ) { // 63us * 3.58MHz = 227
 
             while(video_hsync==0) ;
             cpu_hsync=cpu_cycles;
             video_hsync=0;
         }
+#endif
 
         if((video_vsync==2)&&(cpu.iff1)) {
             if(vrEmuTms9918RegValue(mainscreen,TMS_REG_1)&0x20) { // VDP Enable interrupt
@@ -2935,13 +2940,12 @@ int main() {
             video_print("->");
 
    // for DEBUG ...
-// #ifdef USE_FDC
+
 //            cursor_x=0;
 //             cursor_y=23;
 //                  sprintf(str,"%04x %04x %04x %04x %04x",Z80_PC(cpu),Z80_AF(cpu),Z80_BC(cpu),Z80_DE(cpu),Z80_HL(cpu));
 // //                 sprintf(str,"%04x",Z80_PC(cpu));
 //                  video_print(str);
-// #endif
 
             if(filelist==0) {
                 draw_files(-1,0);

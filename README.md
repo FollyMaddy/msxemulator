@@ -8,7 +8,7 @@
 MSX1 のエミュレータです。
 以下の機能を実装しています。
 
-- メイン RAM(64KB)
+- メイン RAM (MapperRAM 128KB)
 - VDP (16KB/NTSC)
 - PSG
 - Konami SCC (DAC 出力時のみ)
@@ -17,10 +17,9 @@ MSX1 のエミュレータです。
 - FD (Read Only)
 - Joypad
 
-以下の機能はいまのところ実装の予定はありません。
-(一部のコードは入っていますが CPU パワーが絶望的に足りないのでオフになっています。)
+以下の機能は、限定的にサポートしています。
 
-- FM 音源(OPLL)
+- FM 音源 (MSX-MUSIC/OPLL) DAC 出力時のみ
 
 ---
 # 配線
@@ -72,6 +71,10 @@ I2S DAC との接続は以下のようになります。DAC 側の設定につ�
 - GPIO15 BCLK
 - GPIO16 LRCLK
 
+FM 音源(MSX-MUSIC)を有効にすると、Pico のクロックをさらにオーバークロックするために、不安定になりがちです。
+また、CPU速度調整などの機能が無効になります。
+高速化のために OPLL の一部の処理が無効になっていますので、厳密なエミュレーションにはなっていません。
+
 ---
 # 使い方
 
@@ -79,8 +82,9 @@ I2S DAC との接続は以下のようになります。DAC 側の設定につ�
 
 - msxemulator.uf2           PWM 出力(PSGのみ) 
 - msxemulator_scc.uf2       I2S DAC 出力(SCC 対応)
+- msxemulator_opll.uf2      I2S DAC 出力(FM 音源対応)
 
-初めて使う場合には、システム ROM の書き込みが必要です。
+初めて使う場合には、システム ROM などの書き込みが必要です。
 
 ---
 # ROM など
@@ -95,13 +99,20 @@ C-BIOS を使う場合には、`cbios_main_msx1_jp.rom` を使ってください
 
 FDC は SONY タイプの物を実装していますので、対応する DISKBIOS を書き込む必要があります
 
+OPLL を使う場合は、スロットに FM-PAC の ROM イメージをスロットにロードするか、FM-PAC のイメージを本体に書き込んでください。
+
 ```
 ROM 本体
 $ picotool load -v -x msx1.rom -t bin -o 0x10030000
 
 DISKBIOS
 $ picotool load -v -x disk.rom -t bin -o 0x10038000
+
+FM-BIOS
+$ picotool load -v -x fm-pac.rom -t bin -o 0x1003C000
 ```
+
+![Slots](/pictures/screenshot04.jpg)
 
 ---
 # キーボード
