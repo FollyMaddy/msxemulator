@@ -207,7 +207,7 @@ const uint8_t tape_cas_header[] = { 0x1F, 0xA6, 0xDE , 0xBA , 0xCC , 0x13,  0x7D
 
 #define TAPE_WAIT_WIDTH 20
 
-#define TAPE_THRESHOLD 200000
+#define TAPE_THRESHOLD 20000000
 
 uint8_t uart_rx[32];
 uint8_t uart_nibble=0;
@@ -656,6 +656,8 @@ static uint8_t tape_last_bits;
     if(load_enabled==0) {
         return 0;
     }
+
+    load_enabled=2;
 
     tape_diff_cycles=cpu_cycles-tape_cycles;
 //    tape_cycles=cpu_cycles;
