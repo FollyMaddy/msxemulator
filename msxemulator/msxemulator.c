@@ -2735,14 +2735,14 @@ int main() {
         // Wait
 
 //        if((cpu_cycles-cpu_hsync)>1 ) { // 63us * 3.58MHz = 227
-#ifndef USE_OPLL
+//#ifndef USE_OPLL
         if((!cpu_boost)&&(cpu_cycles-cpu_hsync)>198 ) { // 63us * 3.58MHz = 227
 
             while(video_hsync==0) ;
             cpu_hsync=cpu_cycles;
             video_hsync=0;
         }
-#endif
+//#endif
 
         if((video_vsync==2)&&(cpu.iff1)) {
             if(vrEmuTms9918RegValue(mainscreen,TMS_REG_1)&0x20) { // VDP Enable interrupt

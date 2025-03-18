@@ -220,7 +220,8 @@ static double kl_table[16] = {dB2(0.000),  dB2(9.000),  dB2(12.000), dB2(13.875)
                               dB2(19.875), dB2(20.250), dB2(20.625), dB2(21.000)};
 
 //static uint32_t tll_table[8 * 16][1 << TL_BITS][4];
-static uint8_t tll_table[8 * 16][1 << TL_BITS][4];
+//static uint8_t tll_table[8 * 16][1 << TL_BITS][4];
+#include "tll_table.h"
 static int32_t rks_table[8 * 2][2];
 
 static OPLL_PATCH null_patch = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
@@ -365,7 +366,7 @@ static void makeSinTable(void) {
 }
 
 static void makeTllTable(void) {
-
+#if 0
   int32_t tmp;
   int32_t fnum, block, TL, KL;
 
@@ -386,6 +387,7 @@ static void makeTllTable(void) {
       }
     }
   }
+#endif
 }
 
 static void makeRksTable(void) {

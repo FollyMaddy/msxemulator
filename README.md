@@ -185,7 +185,7 @@ FD はライトプロテクト状態になっていますので、書き込み�
 - [pico-extras (I2S)](https://github.com/raspberrypi/pico-extras)
 - [Emu2212](https://github.com/digital-sound-antiques/emu2212)
 - [Emu2149](https://github.com/digital-sound-antiques/emu2149)
-- [Emu2413(未使用)](https://github.com/digital-sound-antiques/emu2413)
+- [Emu2413](https://github.com/digital-sound-antiques/emu2413)
 - [C-BIOS (フォントのみ)](https://cbios.sourceforge.net/)
 - [HID Parser(おそらくLUFAの改変)](https://gist.github.com/SelvinPL/99fd9af4566e759b6553e912b6a163f9)
 
