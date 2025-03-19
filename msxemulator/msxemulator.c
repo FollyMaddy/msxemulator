@@ -52,6 +52,7 @@
 #include "emu2212/emu2212.h"
 #ifdef USE_OPLL
 #include "emu2413/emu2413.h"
+#define USE_I2S     // OPLL can work with I2S DAC
 #endif
 #ifdef USE_I2S
 #include "audio_i2s.pio.h"
