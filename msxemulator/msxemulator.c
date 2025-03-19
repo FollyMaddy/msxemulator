@@ -53,7 +53,9 @@
 #ifdef USE_OPLL
 #include "emu2413/emu2413.h"
 #endif
+#ifdef USE_I2S
 #include "audio_i2s.pio.h"
+#endif
 
 #include "lfs.h"
 #include "fdc.h"

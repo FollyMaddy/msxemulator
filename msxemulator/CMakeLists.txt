@@ -7,6 +7,7 @@ pico_generate_pio_header(msxemulator ${CMAKE_CURRENT_LIST_DIR}/rgb.pio)
 pico_generate_pio_header(msxemulator ${CMAKE_CURRENT_LIST_DIR}/hsync2.pio)
 pico_generate_pio_header(msxemulator ${CMAKE_CURRENT_LIST_DIR}/vsync2.pio)
 pico_generate_pio_header(msxemulator ${CMAKE_CURRENT_LIST_DIR}/rgb2.pio)
+pico_generate_pio_header(msxemulator ${CMAKE_CURRENT_LIST_DIR}/audio_i2s.pio)
 # however, alternatively you can choose to generate it somewhere else (in this case in the source tree for check in)
 #pico_generate_pio_header(pio_blink ${CMAKE_CURRENT_LIST_DIR}/blink.pio OUTPUT_DIR ${CMAKE_CURRENT_LIST_DIR})
 
