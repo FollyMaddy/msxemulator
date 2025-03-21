@@ -242,14 +242,16 @@ uint8_t hid_led;
 // Define the flash sizes
 // This is setup to read a block of the flash from the end 
 #define BLOCK_SIZE_BYTES (FLASH_SECTOR_SIZE)
-// for 1M flash pico
-//#define HW_FLASH_STORAGE_BASE   (1024*1024 - HW_FLASH_STORAGE_BYTES) 
+// for 1M flash ( (1*1024)-512=512 )
 //#define HW_FLASH_STORAGE_BYTES  (512 * 1024)
-// for 2M flash
-// #define HW_FLASH_STORAGE_BYTES  (1024 * 1024)
+//#define HW_FLASH_STORAGE_BASE   (1024*1024 - HW_FLASH_STORAGE_BYTES) 
+// for 2M flash ( (2*1024)-512=1536 )
 #define HW_FLASH_STORAGE_BYTES  (1536 * 1024)
-#define HW_FLASH_STORAGE_BASE   (PICO_FLASH_SIZE_BYTES - HW_FLASH_STORAGE_BYTES) 
-// for 16M flash
+#define HW_FLASH_STORAGE_BASE   (PICO_FLASH_SIZE_BYTES - HW_FLASH_STORAGE_BYTES)
+// for 4M flash ( (4*1024)-512=3584 )
+//#define HW_FLASH_STORAGE_BYTES  (3584 * 1024)
+//#define HW_FLASH_STORAGE_BASE   (1024*1024*4 - HW_FLASH_STORAGE_BYTES) 
+// for 16M flash ( (16*1024)-512=15872 )
 //#define HW_FLASH_STORAGE_BYTES  (15872 * 1024)
 //#define HW_FLASH_STORAGE_BASE   (1024*1024*16 - HW_FLASH_STORAGE_BYTES) 
 
