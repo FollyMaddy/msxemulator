@@ -46,7 +46,7 @@ backporch:
     wait 1 irq 0   side 1         ; Wait for hsync to go high - SIDESET REPLACEMENT HERE
     jmp y-- backporch             ; Remain in backporch, decrementing counter
 
-;wait 1 irq 0                      ; Wait for final (33rd) backporch line (eliminated)
+wait 1 irq 0                      ; Wait for final (33rd) backporch line (eliminated)
 
 .wrap                             ; Program wraps from here
 

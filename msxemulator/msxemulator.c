@@ -64,7 +64,7 @@
 // VGAout configuration
 
 #define DOTCLOCK 25000
-#ifdef USE_OPLL
+#if defined (USE_OVERCLOCK) || defined (USE_OPLL)
 #define CLOCKMUL 10     // This is highly overclockd. it may cause unstable behavier.
 #else
 #define CLOCKMUL 9
@@ -240,18 +240,12 @@ uint8_t hid_led;
 #define USB_CHECK_INTERVAL 30 // 31.5us*30=1ms
 
 // Define the flash sizes
-// This is setup to read a block of the flash from the end 
 #define BLOCK_SIZE_BYTES (FLASH_SECTOR_SIZE)
-// for 1M flash pico
-//#define HW_FLASH_STORAGE_BASE   (1024*1024 - HW_FLASH_STORAGE_BYTES) 
-//#define HW_FLASH_STORAGE_BYTES  (512 * 1024)
-// for 2M flash
-// #define HW_FLASH_STORAGE_BYTES  (1024 * 1024)
-#define HW_FLASH_STORAGE_BYTES  (1536 * 1024)
-#define HW_FLASH_STORAGE_BASE   (PICO_FLASH_SIZE_BYTES - HW_FLASH_STORAGE_BYTES) 
-// for 16M flash
-//#define HW_FLASH_STORAGE_BYTES  (15872 * 1024)
-//#define HW_FLASH_STORAGE_BASE   (1024*1024*16 - HW_FLASH_STORAGE_BYTES) 
+// This is the setup to read a block of the flash from the end 
+// Use the outcome of HW_FLASH_STORAGE_BYTES for creating the little file system
+// Example calculation when using 2MB FLASH as defined in msxemulator.h ->  ((2 * 1024) - 512) * 1024 = 1572864
+#define HW_FLASH_STORAGE_BYTES  (((HW_FLASH_STORAGE_MEGABYTES * 1024) - 512) * 1024)
+#define HW_FLASH_STORAGE_BASE   (1024*1024*HW_FLASH_STORAGE_MEGABYTES - HW_FLASH_STORAGE_BYTES) 
 
 uint8_t __attribute__  ((aligned(sizeof(unsigned char *)*4096))) flash_buffer[4096];
 
@@ -2593,7 +2587,9 @@ int main() {
 
     static uint32_t hsync_wait,vsync_wait;
 
-	// vreg_set_voltage(VREG_VOLTAGE_1_20);
+	#ifdef USE_OVERCLOCKVOLTAGE_1_20
+	vreg_set_voltage(VREG_VOLTAGE_1_20);
+	#endif
 
     set_sys_clock_khz(DOTCLOCK * CLOCKMUL ,true);
 

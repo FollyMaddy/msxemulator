@@ -7,14 +7,14 @@
 #include "hardware/dma.h"
 // Our assembled programs:
 // Each gets the name <pio_filename.pio.h>
-#ifndef USE_OPLL
-#include "hsync.pio.h"
-#include "vsync.pio.h"
-#include "rgb.pio.h"
-#else
+#if defined (USE_OVERCLOCK) || defined (USE_OPLL)
 #include "hsync2.pio.h"
 #include "vsync2.pio.h"
 #include "rgb2.pio.h"
+#else
+#include "hsync.pio.h"
+#include "vsync.pio.h"
+#include "rgb.pio.h"
 #endif
 // Header file
 #include "vga16_graphics.h"
