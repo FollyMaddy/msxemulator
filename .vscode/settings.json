@@ -44,6 +44,7 @@
         "string": "c",
         "string_view": "c",
         "vremutms9918priv.h": "c",
-        "vremutms9918util.h": "c"
+        "vremutms9918util.h": "c",
+        "emu2149.h": "c"
     }
 }

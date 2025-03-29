@@ -7,7 +7,7 @@
 #include "hardware/dma.h"
 // Our assembled programs:
 // Each gets the name <pio_filename.pio.h>
-#ifndef USE_OPLL
+#ifndef USE_MORE_OVERCLOCK
 #include "hsync.pio.h"
 #include "vsync.pio.h"
 #include "rgb.pio.h"

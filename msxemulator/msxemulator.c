@@ -52,7 +52,6 @@
 #include "emu2212/emu2212.h"
 #ifdef USE_OPLL
 #include "emu2413/emu2413.h"
-#define USE_I2S     // OPLL can work with I2S DAC
 #endif
 #ifdef USE_I2S
 #include "audio_i2s.pio.h"
@@ -64,7 +63,7 @@
 // VGAout configuration
 
 #define DOTCLOCK 25000
-#ifdef USE_OPLL
+#ifdef USE_MORE_OVERCLOCK
 #define CLOCKMUL 10     // This is highly overclockd. it may cause unstable behavier.
 #else
 #define CLOCKMUL 9
@@ -2593,7 +2592,11 @@ int main() {
 
     static uint32_t hsync_wait,vsync_wait;
 
-	// vreg_set_voltage(VREG_VOLTAGE_1_20);
+#ifdef USE_CORE_VOLTAGE12
+
+    vreg_set_voltage(VREG_VOLTAGE_1_20);
+
+#endif
 
     set_sys_clock_khz(DOTCLOCK * CLOCKMUL ,true);
 
