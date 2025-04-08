@@ -241,9 +241,10 @@ uint8_t hid_led;
 // Define the flash sizes
 // This is the setup to read a block of the flash from the end 
 #define BLOCK_SIZE_BYTES (FLASH_SECTOR_SIZE)
+#define HW_SYSTEM_RESERVED  512     // 512KiB for System reserved
 // Use the outcome of HW_FLASH_STORAGE_BYTES for creating the little file system
 // Example calculation when using 2MB FLASH as defined in msxemulator.h ->  ((2 * 1024) - 512) * 1024 = 1572864
-#define HW_FLASH_STORAGE_BYTES  (((HW_FLASH_STORAGE_MEGABYTES * 1024) - 512) * 1024)
+#define HW_FLASH_STORAGE_BYTES  (((HW_FLASH_STORAGE_MEGABYTES * 1024) - HW_SYSTEM_RESERVED) * 1024)
 #define HW_FLASH_STORAGE_BASE   (1024*1024*HW_FLASH_STORAGE_MEGABYTES - HW_FLASH_STORAGE_BYTES) 
 
 uint8_t __attribute__  ((aligned(sizeof(unsigned char *)*4096))) flash_buffer[4096];
